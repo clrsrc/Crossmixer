@@ -103,6 +103,7 @@ bool WasapiMultichannelOutput::start(const juce::String& deviceId, RingBuffer<fl
         stop();
 
     shouldStop.store(false);
+    deviceLost.store(false);
     running.store(true);
 
     outputThread = std::thread([this, deviceId, &inputBuffer]()
@@ -342,7 +343,14 @@ bool WasapiMultichannelOutput::start(const juce::String& deviceId, RingBuffer<fl
                 Sleep(5);
 
             UINT32 numFramesPadding = 0;
-            audioClient->GetCurrentPadding(&numFramesPadding);
+            hr = audioClient->GetCurrentPadding(&numFramesPadding);
+            if (FAILED(hr))
+            {
+                // Stream is dead (device removed/invalidated): report and exit
+                DBG("WasapiMultichannelOutput: stream lost, hr=0x" + juce::String::toHexString((int) hr));
+                deviceLost.store(true);
+                break;
+            }
 
             UINT32 numFramesAvailable = bufferFrameCount - numFramesPadding;
             if (numFramesAvailable == 0)
@@ -350,6 +358,11 @@ bool WasapiMultichannelOutput::start(const juce::String& deviceId, RingBuffer<fl
 
             BYTE* pData = nullptr;
             hr = renderClient->GetBuffer(numFramesAvailable, &pData);
+            if (hr == AUDCLNT_E_DEVICE_INVALIDATED || hr == AUDCLNT_E_SERVICE_NOT_RUNNING)
+            {
+                deviceLost.store(true);
+                break;
+            }
             if (FAILED(hr))
                 continue;
 

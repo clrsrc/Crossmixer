@@ -48,6 +48,7 @@ MainComponent::MainComponent()
 
     // Device change callback
     deviceSelector.onDeviceChanged = [this]() { onDeviceChanged(); };
+    deviceSelector.onRefreshClicked = [this]() { handleDeviceListChange(); };
 
     // Preset callbacks
     presetBar.onPresetSelected = [this](const juce::String& name) { loadPreset(name); saveDeviceSelection(); };
@@ -60,6 +61,8 @@ MainComponent::MainComponent()
     refreshDeviceLists();
     refreshPresetList();
     restoreDeviceSelection();
+    preferredInputId = deviceSelector.getSelectedInputId();
+    preferredOutputId = deviceSelector.getSelectedOutputId();
 
     // Auto-start engine with restored devices
     startEngine();
@@ -73,11 +76,20 @@ MainComponent::MainComponent()
     engine.getRouter().setSwapFront(swapFrontButton.getToggleState());
     engine.getRouter().setSwapRear(swapRearButton.getToggleState());
 
+    // Watch for audio devices appearing/disappearing (e.g. Bluetooth headset).
+    // Windows fires several events per connect, so debounce via timer.
+    deviceNotifier = std::make_unique<DeviceChangeNotifier>([this]() { scheduleDeviceListChange(); });
+
+    // Watchdog: debounced device changes, dead-stream detection, start retries
+    startTimer(250);
+
     setSize(900, 650);
 }
 
 MainComponent::~MainComponent()
 {
+    deviceNotifier.reset();
+    stopTimer();
     stopEngine();
     setLookAndFeel(nullptr);
 }
@@ -138,8 +150,90 @@ void MainComponent::refreshDeviceLists()
     deviceSelector.setOutputDevices(outputDevices);
 }
 
+void MainComponent::scheduleDeviceListChange()
+{
+    deviceChangePending = true;
+    deviceChangeDueMs = juce::Time::getMillisecondCounter() + 750;
+}
+
+void MainComponent::timerCallback()
+{
+    const auto now = juce::Time::getMillisecondCounter();
+
+    // 1) Debounced endpoint notification (Windows fires several per connect)
+    if (deviceChangePending)
+    {
+        if (static_cast<juce::int32>(now - deviceChangeDueMs) >= 0)
+        {
+            deviceChangePending = false;
+            handleDeviceListChange();
+        }
+        return;
+    }
+
+    // 2) Stream died while the device ID stayed the same (BT reconnect or
+    //    A2DP/hands-free profile switch, format change): restart after settling
+    if (engine.isRunning() && engine.hasDeviceError())
+    {
+        stopEngine();
+        statusLabel.setText("Device lost - reconnecting...", juce::dontSendNotification);
+        scheduleDeviceListChange();
+        return;
+    }
+
+    // 3) Last start failed (a freshly connected BT endpoint is often not ready
+    //    yet): retry. A missing device is handled by the endpoint notification.
+    if (engineStartFailed && !engine.isRunning()
+        && static_cast<juce::int32>(now - nextRetryMs) >= 0)
+    {
+        nextRetryMs = now + 3000;
+        handleDeviceListChange();
+    }
+}
+
+void MainComponent::handleDeviceListChange()
+{
+    refreshDeviceLists();
+
+    // No preference yet (e.g. no device existed at startup): adopt the default selection
+    if (preferredInputId.isEmpty())
+        preferredInputId = deviceSelector.getSelectedInputId();
+    if (preferredOutputId.isEmpty())
+        preferredOutputId = deviceSelector.getSelectedOutputId();
+
+    const bool inputAvailable = preferredInputId.isNotEmpty() && deviceSelector.selectInputById(preferredInputId);
+    const bool outputAvailable = preferredOutputId.isNotEmpty() && deviceSelector.selectOutputById(preferredOutputId);
+
+    if (!inputAvailable)
+        deviceSelector.clearInputSelection();
+    if (!outputAvailable)
+        deviceSelector.clearOutputSelection();
+
+    if (inputAvailable && outputAvailable)
+    {
+        // (Re)start unless the engine is already running healthy on these devices
+        if (activeInputId != preferredInputId || activeOutputId != preferredOutputId
+            || !engine.isRunning() || engine.hasDeviceError())
+        {
+            stopEngine();
+            startEngine();
+        }
+    }
+    else
+    {
+        if (engine.isRunning())
+            stopEngine();
+
+        statusLabel.setText("Selected device not available - waiting for it or choose another",
+                            juce::dontSendNotification);
+    }
+}
+
 void MainComponent::onDeviceChanged()
 {
+    preferredInputId = deviceSelector.getSelectedInputId();
+    preferredOutputId = deviceSelector.getSelectedOutputId();
+
     stopEngine();
     saveDeviceSelection();
     startEngine();
@@ -152,8 +246,8 @@ void MainComponent::saveDeviceSelection()
                             .getChildFile("devices.xml");
 
     juce::ValueTree state("DeviceSelection");
-    state.setProperty("inputId", deviceSelector.getSelectedInputId(), nullptr);
-    state.setProperty("outputId", deviceSelector.getSelectedOutputId(), nullptr);
+    state.setProperty("inputId", preferredInputId, nullptr);
+    state.setProperty("outputId", preferredOutputId, nullptr);
     state.setProperty("lastPreset", presetBar.getSelectedPresetName(), nullptr);
     state.setProperty("swapFront", swapFrontButton.getToggleState(), nullptr);
     state.setProperty("swapRear", swapRearButton.getToggleState(), nullptr);
@@ -213,6 +307,10 @@ void MainComponent::startEngine()
 
     if (engine.start(inputId, outputId))
     {
+        engineStartFailed = false;
+        activeInputId = inputId;
+        activeOutputId = outputId;
+
         // Connect channel strips to engine
         for (int i = 0; i < 6; ++i)
         {
@@ -245,13 +343,17 @@ void MainComponent::startEngine()
     }
     else
     {
-        statusLabel.setText("Failed to start audio engine", juce::dontSendNotification);
+        engineStartFailed = true;
+        nextRetryMs = juce::Time::getMillisecondCounter() + 3000;
+        statusLabel.setText("Failed to start audio engine - retrying...", juce::dontSendNotification);
     }
 }
 
 void MainComponent::stopEngine()
 {
     engine.stop();
+    activeInputId.clear();
+    activeOutputId.clear();
 
     inputSpectrum.setActive(false);
     inputSpectrum.setSource(nullptr, 48000.0);

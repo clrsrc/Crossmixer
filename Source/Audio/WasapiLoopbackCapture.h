@@ -33,6 +33,10 @@ public:
 
     bool isRunning() const { return running.load(); }
 
+    // True once the stream died (device removed/invalidated, e.g. Bluetooth
+    // disconnect or profile switch). Cleared by start().
+    bool hasDeviceError() const { return deviceLost.load(); }
+
     // Returns the sample rate of the captured stream
     int getSampleRate() const { return sampleRate; }
     int getNumChannels() const { return numChannels; }
@@ -47,6 +51,7 @@ private:
     std::thread captureThread;
     std::atomic<bool> running{false};
     std::atomic<bool> shouldStop{false};
+    std::atomic<bool> deviceLost{false};
 
     int sampleRate = 0;
     int numChannels = 0;

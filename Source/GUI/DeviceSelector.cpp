@@ -24,11 +24,24 @@ DeviceSelector::DeviceSelector()
             onDeviceChanged();
     };
     addAndMakeVisible(outputCombo);
+
+    inputCombo.setTextWhenNothingSelected("(device not available)");
+    outputCombo.setTextWhenNothingSelected("(device not available)");
+
+    refreshButton.setTooltip("Reload the list of audio devices");
+    refreshButton.onClick = [this]()
+    {
+        if (onRefreshClicked)
+            onRefreshClicked();
+    };
+    addAndMakeVisible(refreshButton);
 }
 
 void DeviceSelector::resized()
 {
     auto bounds = getLocalBounds().reduced(4, 2);
+
+    refreshButton.setBounds(bounds.removeFromRight(70).reduced(2, 4));
 
     auto topRow = bounds.removeFromTop(bounds.getHeight() / 2);
     auto bottomRow = bounds;
@@ -88,26 +101,38 @@ juce::String DeviceSelector::getSelectedOutputId() const
     return {};
 }
 
-void DeviceSelector::selectInputById(const juce::String& id)
+bool DeviceSelector::selectInputById(const juce::String& id)
 {
     for (int i = 0; i < static_cast<int>(inputIds.size()); ++i)
     {
         if (inputIds[i] == id)
         {
             inputCombo.setSelectedItemIndex(i, juce::dontSendNotification);
-            return;
+            return true;
         }
     }
+    return false;
 }
 
-void DeviceSelector::selectOutputById(const juce::String& id)
+void DeviceSelector::clearInputSelection()
+{
+    inputCombo.setSelectedId(0, juce::dontSendNotification);
+}
+
+bool DeviceSelector::selectOutputById(const juce::String& id)
 {
     for (int i = 0; i < static_cast<int>(outputIds.size()); ++i)
     {
         if (outputIds[i] == id)
         {
             outputCombo.setSelectedItemIndex(i, juce::dontSendNotification);
-            return;
+            return true;
         }
     }
+    return false;
+}
+
+void DeviceSelector::clearOutputSelection()
+{
+    outputCombo.setSelectedId(0, juce::dontSendNotification);
 }
