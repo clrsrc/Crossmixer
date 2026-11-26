@@ -101,6 +101,7 @@ bool WasapiLoopbackCapture::start(const juce::String& deviceId, RingBuffer<float
         stop();
 
     shouldStop.store(false);
+    deviceLost.store(false);
 
     // Launch capture in a separate thread so COM apartment is properly set up
     running.store(true);
@@ -321,6 +322,16 @@ bool WasapiLoopbackCapture::start(const juce::String& deviceId, RingBuffer<float
 
                 localCapture->ReleaseBuffer(numFramesAvailable);
                 hr = localCapture->GetNextPacketSize(&packetLength);
+            }
+
+            // Stream is dead (device removed, BT profile switch, format change,
+            // audio service restart): stop the loop and report it so the GUI
+            // can restart the engine. Otherwise we would spin silently forever.
+            if (FAILED(hr))
+            {
+                DBG("WasapiLoopbackCapture: stream lost, hr=0x" + juce::String::toHexString((int) hr));
+                deviceLost.store(true);
+                break;
             }
 
             // Sleep ~5ms between polls

@@ -20,6 +20,7 @@ target_sources(Crossmixer PRIVATE
     Source/Audio/AudioEngine.cpp
     Source/Audio/ChannelProcessor.cpp
     Source/Audio/StereoTo51Router.cpp
+    Source/Audio/DeviceChangeNotifier.cpp
     Source/GUI/MainComponent.cpp
     Source/GUI/ChannelStrip.cpp
     Source/GUI/MasterSection.cpp

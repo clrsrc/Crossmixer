@@ -50,6 +50,9 @@ public:
 
     bool isRunning() const { return running.load(); }
 
+    // True if capture or output stream died while running (device gone/invalidated)
+    bool hasDeviceError() const { return capture.hasDeviceError() || output.hasDeviceError(); }
+
     // Access channel processors for GUI control
     ChannelProcessor& getChannelProcessor(int channel) { return channelProcessors[channel]; }
 

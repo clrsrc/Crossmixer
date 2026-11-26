@@ -7,10 +7,12 @@
 #include "SpectrumAnalyzer.h"
 #include "CrossmixerLookAndFeel.h"
 #include "../Audio/AudioEngine.h"
+#include "../Audio/DeviceChangeNotifier.h"
 #include "../Preset/PresetManager.h"
 #include "../Preset/ParameterLayout.h"
 
-class MainComponent : public juce::Component
+class MainComponent : public juce::Component,
+                      private juce::Timer
 {
 public:
     MainComponent();
@@ -29,6 +31,9 @@ private:
     void onDeviceChanged();
     void saveDeviceSelection();
     void restoreDeviceSelection();
+    void handleDeviceListChange();
+    void scheduleDeviceListChange();
+    void timerCallback() override;
 
     // Preset management
     void saveCurrentPreset();
@@ -55,6 +60,20 @@ private:
 
     AudioEngine engine;
     PresetManager presetManager;
+
+    // Devices the user chose (kept while a device is temporarily disconnected)
+    juce::String preferredInputId, preferredOutputId;
+    // Devices the running engine uses (empty when stopped)
+    juce::String activeInputId, activeOutputId;
+
+    // Watchdog timer state (message thread only)
+    bool deviceChangePending = false;
+    juce::uint32 deviceChangeDueMs = 0;
+    juce::uint32 nextRetryMs = 0;
+    bool engineStartFailed = false;
+
+    // Must be destroyed before the members its callback uses
+    std::unique_ptr<DeviceChangeNotifier> deviceNotifier;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };
