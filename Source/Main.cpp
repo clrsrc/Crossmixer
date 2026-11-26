@@ -8,7 +8,7 @@ public:
     CrossmixerApplication() = default;
 
     const juce::String getApplicationName() override    { return "Crossmixer"; }
-    const juce::String getApplicationVersion() override { return "1.0.0"; }
+    const juce::String getApplicationVersion() override { return "1.0.1"; }
     bool moreThanOneInstanceAllowed() override           { return false; }
 
     void initialise(const juce::String& /*commandLine*/) override
